@@ -1,11 +1,21 @@
-from functools import lru_cache
-import os
-import pathlib
-from typing import Annotated
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+import firebase_admin
+from fastapi import FastAPI
+import firebase_admin
+from fastapi.middleware.cors import CORSMiddleware
+import os
+import pathlib
+from functools import lru_cache
+from typing import Annotated, Optional
+from dotenv import load_dotenv
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from firebase_admin.auth import verify_id_token
+from pydantic_settings import BaseSettings
+from sqlalchemy import create_engine
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from firebase_admin.auth import verify_id_token
 from pydantic_settings import BaseSettings
 from sqlalchemy import create_engine, Column, String, Integer, Boolean, JSON, ForeignKey
@@ -13,49 +23,50 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
 
-# FastAPI app instance
-app = FastAPI()
-
-
 basedir = pathlib.Path(__file__).parents[1]
 load_dotenv(basedir / ".env")
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 class Settings(BaseSettings):
-    app_name: str = "Tutorly Backend"
+    app_name: str = "tutorly"
     env: str = os.getenv("ENV", "development")
-    frontend_url: str = os.getenv("FRONTEND_URL", "")
+    frontend_url: str = os.getenv("FRONTEND_URL", "NA")
 
 
 @lru_cache
 def get_settings() -> Settings:
+    """Retrieves the fastapi settings"""
     return Settings()
 
 
-bearer_scheme = HTTPBearer(auto_error=False)
-
-
 def get_firebase_user_from_token(
-    token: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
-):
+    token: Annotated[Optional[HTTPAuthorizationCredentials], Depends(bearer_scheme)],
+) -> Optional[dict]:
     try:
         if not token:
-            raise ValueError("No token provided")
+            raise ValueError("No token")
         user = verify_id_token(token.credentials)
         return user
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-            headers={"WWW-Authenticate": "Bearer"},  # Review
+            detail="Not logged in or Invalid credentials",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
 
-# Load firebase configuration and Environemnt
+app = FastAPI()
+
+
+@app.get("/userid")
+async def get_userid(user: Annotated[dict, Depends(get_firebase_user_from_token)]):
+    """gets the firebase connected user"""
+    return {"id": user["uid"]}
+
+
 settings = get_settings()
 origins = [settings.frontend_url]
-
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -63,20 +74,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+firebase_admin.initialize_app()
 
-# Database setup
-DATABASE_URL = "sqlite:///./test.db"
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
+
+
+DATABASE_URL = "sqlite:///./tutorly.db"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
+
+
 Base = declarative_base()
-
-
-# Database model
-class Item(Base):
-    __tablename__ = "items"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    description = Column(String)
 
 
 # The main User table stores data common to all authenticated users.
@@ -132,7 +146,7 @@ class Session(Base):
     subject = Column(String)
 
 
-# Create tables
+# # Create tables
 Base.metadata.create_all(bind=engine)
 
 
@@ -143,6 +157,7 @@ def get_db():
         yield db
     finally:
         db.close()
+
 
 # Pydantic model for User data
 class UserCreate(BaseModel):
@@ -182,3 +197,9 @@ async def create_user(
         db.commit()
         db.refresh(user)
         return user
+
+
+@app.get("/userid")
+async def get_userid(user: Annotated[dict, Depends(get_firebase_user_from_token)]):
+    """gets the firebase connected user"""
+    return {"id": user["uid"]}
