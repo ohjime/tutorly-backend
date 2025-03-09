@@ -8,7 +8,6 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from firebase_admin.auth import verify_id_token
 from pydantic_settings import BaseSettings
-from app.config import get_firebase_user_from_token, get_settings
 from sqlalchemy import create_engine, Column, String, Integer, Boolean, JSON, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
